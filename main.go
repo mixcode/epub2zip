@@ -72,28 +72,36 @@ type OPF struct {
 			Properties string `xml:"properties,attr"` // e.g., "page-spread-left" or "rendition:page-spread-center"
 		} `xml:"itemref"`
 	} `xml:"spine"`
+	Guide []struct {
+		Type  string `xml:"type,attr"`
+		Title string `xml:"title,attr"`
+		Href  string `xml:"href,attr"`
+	} `xml:"guide>reference"`
 }
 
 // Item represents an individual resource (HTML, Image, CSS) listed in the OPF manifest.
 type Item struct {
-	ID        string `xml:"id,attr"`
-	Href      string `xml:"href,attr"`       // Relative path to the file from the OPF file location
-	MediaType string `xml:"media-type,attr"` // MIME type (e.g., "image/jpeg", "application/xhtml+xml")
+	ID         string `xml:"id,attr"`
+	Href       string `xml:"href,attr"`       // Relative path to the file from the OPF file location
+	MediaType  string `xml:"media-type,attr"` // MIME type (e.g., "image/jpeg", "application/xhtml+xml")
+	Properties string `xml:"properties,attr"` // e.g., "nav" for Navigation Document
 }
 
 // --- Command-line Switches Configuration ---
 
 // Config holds the runtime configuration parsed from CLI flags.
 type Config struct {
-	InputPaths   []string // List of source .epub files
-	OutputPath   string   // Target output directory or filename
-	Padding      int      // Number of zero-padded digits for sequential filenames (default: 4)
-	Verbose      bool     // If true, prints detailed runtime logs
-	DryRun       bool     // If true, simulates the process without writing any files
-	BlankMode    string   // "skip" (increment sequence but no file) or "generate" (create alignment placeholder)
-	BlankColor   string   // Color for generated blanks: "white", "black", "transparent", or #HEX
-	MetadataJSON string   // Control for metadata.json inclusion: "none", "compact", or "pretty"
-	Force        bool     // Proceed even if the book is detected as reflowable
+	InputPaths     []string // List of source .epub files
+	OutputPath     string   // Target output directory or filename
+	Padding        int      // Number of zero-padded digits for sequential filenames (default: 4)
+	Verbose        bool     // If true, prints detailed runtime logs
+	DryRun         bool     // If true, simulates the process without writing any files
+	BlankMode      string   // "skip" (increment sequence but no file) or "generate" (create alignment placeholder)
+	BlankColor     string   // Color for generated blanks: "white", "black", "transparent", or #HEX
+	MetadataJSON   string   // Control for metadata.json inclusion: "none", "compact", or "pretty"
+	Force          bool     // Proceed even if the book is detected as reflowable
+	PrefixParts    bool     // Prefix filenames with part names (e.g., 01_cover_0001.jpg)
+	TotalNumbering bool     // Do not reset page numbers for each part
 }
 
 func main() {
@@ -149,6 +157,8 @@ func parseFlags() *Config {
 	flag.StringVar(&cfg.BlankColor, "blank-color", "transparent", "Blank page color: transparent, white, black, or #RRGGBB[AA]")
 	flag.StringVar(&cfg.MetadataJSON, "m", "pretty", "Include metadata as JSON: none, compact, pretty")
 	flag.BoolVar(&cfg.Force, "f", false, "Force execution even if reflowable book is detected")
+	flag.BoolVar(&cfg.PrefixParts, "prefix-parts", true, "Prefix filenames with structural part names")
+	flag.BoolVar(&cfg.TotalNumbering, "total-numbering", false, "Use global page numbering instead of per-part reset")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [flags] <input.epub> [<input2.epub> ...]\n", os.Args[0])
@@ -228,6 +238,15 @@ func run(cfg *Config, inputPath, outputPath string) error {
 		manifestMap[item.ID] = item
 	}
 
+	// 3.5 Extract structural landmarks (if enabled)
+	var landmarks map[string]string
+	if cfg.PrefixParts {
+		landmarks = extractLandmarks(reader, opf, opfPath)
+		if cfg.Verbose && len(landmarks) > 0 {
+			log.Printf("Extracted %d structural landmarks\n", len(landmarks))
+		}
+	}
+
 	// 4. Extract image paths from spine.
 	// We iterate through the spine (the linear reading order) and resolve either direct image references
 	// or HTML wrapper files containing one or more images.
@@ -237,9 +256,10 @@ func run(cfg *Config, inputPath, outputPath string) error {
 		Height int
 	}
 	type Page struct {
-		Images  []ImageInfo
-		IsBlank bool
-		Spread  string // "left", "right", or "center" (used for alignment)
+		SourceHTML string // Path to the XHTML file this page originated from
+		Images     []ImageInfo
+		IsBlank    bool
+		Spread     string // "left", "right", or "center" (used for alignment)
 	}
 	var pages []Page
 
@@ -265,17 +285,19 @@ func run(cfg *Config, inputPath, outputPath string) error {
 		fullPath = filepath.ToSlash(fullPath)
 
 		var absImgPaths []string
+		sourceHTML := ""
 		if strings.HasPrefix(item.MediaType, "image/") {
 			// Direct image reference in spine.
 			absImgPaths = []string{fullPath}
 		} else {
+			sourceHTML = fullPath
 			// HTML wrapper: parse the DOM to find all target images.
 			imgPaths, err := extractImageFromHTML(reader, fullPath)
 			if err != nil {
 				if cfg.Verbose {
 					log.Printf("Page %d (%s): %v\n", i+1, fullPath, err)
 				}
-				pages = append(pages, Page{IsBlank: true, Spread: spread})
+				pages = append(pages, Page{SourceHTML: sourceHTML, IsBlank: true, Spread: spread})
 				continue
 			}
 			for _, ip := range imgPaths {
@@ -296,7 +318,7 @@ func run(cfg *Config, inputPath, outputPath string) error {
 			pageImages = append(pageImages, ImageInfo{Path: imgPath, Width: w, Height: h})
 		}
 
-		pages = append(pages, Page{Images: pageImages, Spread: spread})
+		pages = append(pages, Page{SourceHTML: sourceHTML, Images: pageImages, Spread: spread})
 		if cfg.Verbose {
 			log.Printf("Page %d: Found %d images [spread: %s]\n", i+1, len(pageImages), spread)
 			for j, img := range pageImages {
@@ -312,47 +334,80 @@ func run(cfg *Config, inputPath, outputPath string) error {
 	// If a page's metadata says it's a 'right' page but the sequence is currently 'odd' in RTL,
 	// we must insert a blank to shift it to an 'even' position.
 	type OutputPage struct {
-		SourceIdx int // index in 'pages' slice, or -1 for alignment blanks
-		PageNum   int
+		SourceIdx int    // index in 'pages' slice, or -1 for alignment blanks
+		PageNum   int    // per-part page number (or global if total-numbering)
+		PartName  string // e.g., "cover", "bodymatter"
+		PartIdx   int    // 1, 2, 3...
 	}
 	var outputPages []OutputPage
 
 	isRTL := opf.Spine.Direction == "rtl"
 
-	currentPageNum := 1
+	currentPartName := ""
+	currentPartIdx := 0
+	currentPageNum := 1    // Label number (resets per part)
+	globalPhysicalIdx := 1 // Physical position (never resets, includes blanks)
+
 	for i := range pages {
 		p := &pages[i]
 
+		// Part Transition Logic
+		if p.SourceHTML != "" && landmarks != nil {
+			if partType, ok := landmarks[p.SourceHTML]; ok {
+				if partType != currentPartName {
+					currentPartName = partType
+					currentPartIdx++
+					if !cfg.TotalNumbering {
+						currentPageNum = 1 // Reset label for new part
+					}
+					if cfg.Verbose {
+						log.Printf("Part %d Started: %s (at source page %d, physical pos %d)\n", currentPartIdx, currentPartName, i+1, globalPhysicalIdx)
+					}
+				}
+			}
+		}
+
 		needsPadding := false
 		if isRTL {
-			// In RTL: Odd is Left, Even is Right.
-			if p.Spread == "right" && currentPageNum%2 != 0 {
-				needsPadding = true // 'Right' must be Even (2, 4, 6...)
-			} else if p.Spread == "left" && currentPageNum%2 == 0 {
-				needsPadding = true // 'Left' must be Odd (1, 3, 5...)
+			// In RTL: Odd physical index is Left, Even is Right.
+			if p.Spread == "right" && globalPhysicalIdx%2 != 0 {
+				needsPadding = true // 'Right' must be Even
+			} else if p.Spread == "left" && globalPhysicalIdx%2 == 0 {
+				needsPadding = true // 'Left' must be Odd
 			}
 		} else {
-			// In LTR: Odd is Right, Even is Left.
-			if p.Spread == "left" && currentPageNum%2 != 0 {
-				needsPadding = true // 'Left' must be Even (2, 4, 6...)
-			} else if p.Spread == "right" && currentPageNum%2 == 0 {
-				needsPadding = true // 'Right' must be Odd (1, 3, 5...)
+			// In LTR: Odd physical index is Right, Even is Left.
+			if p.Spread == "left" && globalPhysicalIdx%2 != 0 {
+				needsPadding = true // 'Left' must be Even
+			} else if p.Spread == "right" && globalPhysicalIdx%2 == 0 {
+				needsPadding = true // 'Right' must be Odd
 			}
 		}
 
 		if needsPadding {
-			// Insert a blank page for alignment if requested.
 			if cfg.BlankMode == "generate" || cfg.BlankMode == "skip" {
 				if cfg.Verbose {
-					log.Printf("Aligning page %d (Source %d) due to %s spread\n", currentPageNum, i+1, p.Spread)
+					log.Printf("Aligning physical pos %d (Source %d) due to %s spread\n", globalPhysicalIdx, i+1, p.Spread)
 				}
-				outputPages = append(outputPages, OutputPage{SourceIdx: -1, PageNum: currentPageNum})
+				outputPages = append(outputPages, OutputPage{
+					SourceIdx: -1,
+					PageNum:   currentPageNum,
+					PartName:  currentPartName,
+					PartIdx:   currentPartIdx,
+				})
 				currentPageNum++
+				globalPhysicalIdx++
 			}
 		}
 
-		outputPages = append(outputPages, OutputPage{SourceIdx: i, PageNum: currentPageNum})
+		outputPages = append(outputPages, OutputPage{
+			SourceIdx: i,
+			PageNum:   currentPageNum,
+			PartName:  currentPartName,
+			PartIdx:   currentPartIdx,
+		})
 		currentPageNum++
+		globalPhysicalIdx++
 	}
 
 	// 6. Handle blank pages dimensions for those with SourceIdx == -1
@@ -362,17 +417,22 @@ func run(cfg *Config, inputPath, outputPath string) error {
 	if cfg.DryRun {
 		fmt.Printf("Dry run: planned output to %s (Direction: %s)\n", outputPath, opf.Spine.Direction)
 		for _, op := range outputPages {
+			partInfo := ""
+			if op.PartName != "" && cfg.PrefixParts {
+				partInfo = fmt.Sprintf("[%02d_%s] ", op.PartIdx, op.PartName)
+			}
+
 			if op.SourceIdx == -1 {
-				fmt.Printf("  Page %0*d: [Alignment Blank]\n", cfg.Padding, op.PageNum)
+				fmt.Printf("  Page %s%0*d: [Alignment Blank]\n", partInfo, cfg.Padding, op.PageNum)
 			} else {
 				p := pages[op.SourceIdx]
 				if p.IsBlank {
-					fmt.Printf("  Page %0*d: [Skipped Blank]\n", cfg.Padding, op.PageNum)
+					fmt.Printf("  Page %s%0*d: [Skipped Blank]\n", partInfo, cfg.Padding, op.PageNum)
 				} else {
 					if len(p.Images) == 1 {
-						fmt.Printf("  Page %0*d: %s (%s)\n", cfg.Padding, op.PageNum, p.Images[0].Path, p.Spread)
+						fmt.Printf("  Page %s%0*d: %s (%s)\n", partInfo, cfg.Padding, op.PageNum, p.Images[0].Path, p.Spread)
 					} else {
-						fmt.Printf("  Page %0*d: (%d images) (%s)\n", cfg.Padding, op.PageNum, len(p.Images), p.Spread)
+						fmt.Printf("  Page %s%0*d: (%d images) (%s)\n", partInfo, cfg.Padding, op.PageNum, len(p.Images), p.Spread)
 						for j, img := range p.Images {
 							fmt.Printf("    [%d]: %s\n", j+1, img.Path)
 						}
@@ -446,7 +506,13 @@ func run(cfg *Config, inputPath, outputPath string) error {
 				}
 			}
 
-			name := fmt.Sprintf("%0*d_blank.png", cfg.Padding, op.PageNum)
+			var name string
+			if op.PartName != "" && cfg.PrefixParts {
+				name = fmt.Sprintf("%02d_%s_%0*d_blank.png", op.PartIdx, op.PartName, cfg.Padding, op.PageNum)
+			} else {
+				name = fmt.Sprintf("%0*d_blank.png", cfg.Padding, op.PageNum)
+			}
+
 			writer, err := archive.Create(name)
 			if err != nil {
 				return err
@@ -469,10 +535,18 @@ func run(cfg *Config, inputPath, outputPath string) error {
 			}
 
 			var name string
-			if len(p.Images) == 1 {
-				name = fmt.Sprintf("%0*d%s", cfg.Padding, op.PageNum, ext)
+			if op.PartName != "" && cfg.PrefixParts {
+				if len(p.Images) == 1 {
+					name = fmt.Sprintf("%02d_%s_%0*d%s", op.PartIdx, op.PartName, cfg.Padding, op.PageNum, ext)
+				} else {
+					name = fmt.Sprintf("%02d_%s_%0*d_%d%s", op.PartIdx, op.PartName, cfg.Padding, op.PageNum, j+1, ext)
+				}
 			} else {
-				name = fmt.Sprintf("%0*d_%d%s", cfg.Padding, op.PageNum, j+1, ext)
+				if len(p.Images) == 1 {
+					name = fmt.Sprintf("%0*d%s", cfg.Padding, op.PageNum, ext)
+				} else {
+					name = fmt.Sprintf("%0*d_%d%s", cfg.Padding, op.PageNum, j+1, ext)
+				}
 			}
 
 			writer, err := archive.Create(name)
@@ -491,7 +565,6 @@ func run(cfg *Config, inputPath, outputPath string) error {
 			}
 		}
 	}
-
 	if cfg.Verbose {
 		log.Printf("Created %s\n", outputPath)
 	}
@@ -617,6 +690,85 @@ func extractImageFromHTML(r *zip.ReadCloser, path string) ([]string, error) {
 		return nil, fmt.Errorf("no image found in %s", path)
 	}
 	return imgPaths, nil
+}
+
+// extractLandmarks builds a map of spine item paths to their structural type (e.g., "cover", "bodymatter").
+// It supports both EPUB 3 navigation documents and EPUB 2 guide elements.
+func extractLandmarks(r *zip.ReadCloser, opf *OPF, opfPath string) map[string]string {
+	landmarks := make(map[string]string)
+	opfBase := filepath.Dir(opfPath)
+
+	// 1. Try EPUB 3 Navigation Document (Landmarks)
+	var navPath string
+	for _, item := range opf.Manifest {
+		if strings.Contains(item.Properties, "nav") {
+			navPath = filepath.ToSlash(filepath.Join(opfBase, item.Href))
+			break
+		}
+	}
+
+	if navPath != "" {
+		f, err := r.Open(navPath)
+		if err == nil {
+			defer f.Close()
+			doc, err := html.Parse(f)
+			if err == nil {
+				var fNode func(*html.Node)
+				fNode = func(n *html.Node) {
+					if n.Type == html.ElementNode && n.Data == "nav" {
+						isLandmarks := false
+						for _, a := range n.Attr {
+							if a.Key == "epub:type" && a.Val == "landmarks" {
+								isLandmarks = true
+								break
+							}
+						}
+						if isLandmarks {
+							// Extract <a> tags inside this <nav>
+							var fAnchor func(*html.Node)
+							fAnchor = func(an *html.Node) {
+								if an.Type == html.ElementNode && an.Data == "a" {
+									var href, eType string
+									for _, a := range an.Attr {
+										if a.Key == "href" {
+											href = a.Val
+										} else if a.Key == "epub:type" {
+											eType = a.Val
+										}
+									}
+									if href != "" && eType != "" {
+										// Normalize path (remove anchors)
+										cleanHref := strings.Split(href, "#")[0]
+										absPath := filepath.ToSlash(filepath.Join(filepath.Dir(navPath), cleanHref))
+										landmarks[absPath] = eType
+									}
+								}
+								for c := an.FirstChild; c != nil; c = c.NextSibling {
+									fAnchor(c)
+								}
+							}
+							fAnchor(n)
+						}
+					}
+					for c := n.FirstChild; c != nil; c = c.NextSibling {
+						fNode(c)
+					}
+				}
+				fNode(doc)
+			}
+		}
+	}
+
+	// 2. Fallback to EPUB 2 <guide> if landmarks are empty
+	if len(landmarks) == 0 {
+		for _, ref := range opf.Guide {
+			cleanHref := strings.Split(ref.Href, "#")[0]
+			absPath := filepath.ToSlash(filepath.Join(opfBase, cleanHref))
+			landmarks[absPath] = ref.Type
+		}
+	}
+
+	return landmarks
 }
 
 // isFixedLayout checks the book metadata for properties indicating a fixed layout.
