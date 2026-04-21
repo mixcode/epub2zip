@@ -73,7 +73,7 @@ The tool supports several naming conventions depending on your flags:
 1.  **Default** (`--prefix-parts`): `[PartIdx]_[PartName]_[PartPageNum].ext` (e.g., `02_本編_0001.jpg`)
 2.  **Combined** (`--prefix-parts --total-numbering`): `[GlobalNum]_[PartIdx]_[PartName]_[PartPageNum].ext` (e.g., `0012_02_本編_0010.jpg`)
 3.  **Global Only** (`--total-numbering` only): `[GlobalNum].ext` (e.g., `0012.jpg`)
-4.  **Simple** (both disabled): `[PartPageNum].ext` (resets per part)
+4.  **Simple** (both disabled): Same as Global Only (`[GlobalNum].ext`) to prevent filename collisions.
 
 ## Alignment Logic
 

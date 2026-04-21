@@ -479,7 +479,7 @@ func generateFileName(cfg *Config, op OutputPage, imgIdx int, isBlank bool, ext 
 		return fmt.Sprintf("%02d_%s_%0*d%s%s", op.PartIdx, op.PartName, cfg.Padding, op.PartPageNum, suffix, ext)
 	}
 
-	if cfg.TotalNumbering {
+	if cfg.TotalNumbering || !cfg.PrefixParts {
 		return fmt.Sprintf("%0*d%s%s", cfg.Padding, op.GlobalPageNum, suffix, ext)
 	}
 	return fmt.Sprintf("%0*d%s%s", cfg.Padding, op.PartPageNum, suffix, ext)
