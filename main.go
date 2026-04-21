@@ -85,30 +85,63 @@ type Item struct {
 
 // Config holds the runtime configuration parsed from CLI flags.
 type Config struct {
-	InputPath    string // Path to the source .epub file
-	OutputPath   string // Path to the target .zip file
-	Padding      int    // Number of zero-padded digits for sequential filenames (default: 4)
-	Verbose      bool   // If true, prints detailed runtime logs
-	DryRun       bool   // If true, simulates the process without writing any files
-	BlankMode    string // "skip" (increment sequence but no file) or "generate" (create alignment placeholder)
-	BlankColor   string // Color for generated blanks: "white", "black", "transparent", or #HEX
-	MetadataJSON string // Control for metadata.json inclusion: "none", "compact", or "pretty"
-	Force        bool   // Proceed even if the book is detected as reflowable
+	InputPaths   []string // List of source .epub files
+	OutputPath   string   // Target output directory or filename
+	Padding      int      // Number of zero-padded digits for sequential filenames (default: 4)
+	Verbose      bool     // If true, prints detailed runtime logs
+	DryRun       bool     // If true, simulates the process without writing any files
+	BlankMode    string   // "skip" (increment sequence but no file) or "generate" (create alignment placeholder)
+	BlankColor   string   // Color for generated blanks: "white", "black", "transparent", or #HEX
+	MetadataJSON string   // Control for metadata.json inclusion: "none", "compact", or "pretty"
+	Force        bool     // Proceed even if the book is detected as reflowable
 }
 
 func main() {
 	cfg := parseFlags()
 
-	if err := run(cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+	// Determine if OutputPath is a directory
+	isDir := false
+	if cfg.OutputPath != "" {
+		info, err := os.Stat(cfg.OutputPath)
+		if err == nil && info.IsDir() {
+			isDir = true
+		}
+	}
+
+	for _, inputPath := range cfg.InputPaths {
+		targetOutput := cfg.OutputPath
+
+		if targetOutput == "" {
+			// Default: input filename but .zip in the CURRENT directory
+			base := filepath.Base(inputPath)
+			ext := filepath.Ext(base)
+			targetOutput = strings.TrimSuffix(base, ext) + ".zip"
+		} else if isDir {
+			// Directory: input filename but .zip inside that directory
+			base := filepath.Base(inputPath)
+			ext := filepath.Ext(base)
+			targetOutput = filepath.Join(cfg.OutputPath, strings.TrimSuffix(base, ext)+".zip")
+		} else if len(cfg.InputPaths) > 1 {
+			// Multiple files but OutputPath is not a directory
+			fmt.Fprintf(os.Stderr, "Error: multiple input files provided but output '%s' is not a directory\n", cfg.OutputPath)
+			os.Exit(1)
+		}
+
+		if cfg.Verbose {
+			log.Printf("Processing: %s -> %s\n", inputPath, targetOutput)
+		}
+
+		if err := run(cfg, inputPath, targetOutput); err != nil {
+			fmt.Fprintf(os.Stderr, "Error processing %s: %v\n", inputPath, err)
+			// Continue to next file
+		}
 	}
 }
 
 // parseFlags initializes and returns the configuration based on CLI arguments.
 func parseFlags() *Config {
 	cfg := &Config{}
-	flag.StringVar(&cfg.OutputPath, "o", "", "Output zip filename (default: same as input with .zip)")
+	flag.StringVar(&cfg.OutputPath, "o", "", "Output zip filename or directory")
 	flag.IntVar(&cfg.Padding, "p", 4, "Filename padding size")
 	flag.BoolVar(&cfg.Verbose, "v", false, "Enable verbose logging")
 	flag.BoolVar(&cfg.DryRun, "d", false, "Dry run: list pages without creating zip")
@@ -118,7 +151,7 @@ func parseFlags() *Config {
 	flag.BoolVar(&cfg.Force, "f", false, "Force execution even if reflowable book is detected")
 
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [flags] <input.epub>\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [flags] <input.epub> [<input2.epub> ...]\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 
@@ -129,10 +162,16 @@ func parseFlags() *Config {
 		os.Exit(1)
 	}
 
-	cfg.InputPath = flag.Arg(0)
-	if cfg.OutputPath == "" {
-		ext := filepath.Ext(cfg.InputPath)
-		cfg.OutputPath = strings.TrimSuffix(cfg.InputPath, ext) + ".zip"
+	// Resolve and expand input paths (for Windows wildcard support)
+	for _, arg := range flag.Args() {
+		if strings.ContainsAny(arg, "*?") {
+			matches, err := filepath.Glob(arg)
+			if err == nil && len(matches) > 0 {
+				cfg.InputPaths = append(cfg.InputPaths, matches...)
+				continue
+			}
+		}
+		cfg.InputPaths = append(cfg.InputPaths, arg)
 	}
 
 	return cfg
@@ -140,13 +179,13 @@ func parseFlags() *Config {
 
 // run is the entry point for the tool's core logic.
 // It orchestrates the EPUB reading, page alignment, and ZIP generation phases.
-func run(cfg *Config) error {
+func run(cfg *Config, inputPath, outputPath string) error {
 	// Validate color early to prevent failing mid-process during ZIP creation.
 	if _, err := parseColor(cfg.BlankColor); err != nil {
 		return err
 	}
 
-	reader, err := zip.OpenReader(cfg.InputPath)
+	reader, err := zip.OpenReader(inputPath)
 	if err != nil {
 		return fmt.Errorf("failed to open epub: %w", err)
 	}
@@ -277,13 +316,13 @@ func run(cfg *Config) error {
 		PageNum   int
 	}
 	var outputPages []OutputPage
-	
+
 	isRTL := opf.Spine.Direction == "rtl"
-	
+
 	currentPageNum := 1
 	for i := range pages {
 		p := &pages[i]
-		
+
 		needsPadding := false
 		if isRTL {
 			// In RTL: Odd is Left, Even is Right.
@@ -300,7 +339,7 @@ func run(cfg *Config) error {
 				needsPadding = true // 'Right' must be Odd (1, 3, 5...)
 			}
 		}
-		
+
 		if needsPadding {
 			// Insert a blank page for alignment if requested.
 			if cfg.BlankMode == "generate" || cfg.BlankMode == "skip" {
@@ -311,17 +350,17 @@ func run(cfg *Config) error {
 				currentPageNum++
 			}
 		}
-		
+
 		outputPages = append(outputPages, OutputPage{SourceIdx: i, PageNum: currentPageNum})
 		currentPageNum++
 	}
 
 	// 6. Handle blank pages dimensions for those with SourceIdx == -1
 	// (Reuse logic from previous step 5 but adapted)
-	
+
 	// 7. Output Generation (DryRun or ZIP write).
 	if cfg.DryRun {
-		fmt.Printf("Dry run: planned output to %s (Direction: %s)\n", cfg.OutputPath, opf.Spine.Direction)
+		fmt.Printf("Dry run: planned output to %s (Direction: %s)\n", outputPath, opf.Spine.Direction)
 		for _, op := range outputPages {
 			if op.SourceIdx == -1 {
 				fmt.Printf("  Page %0*d: [Alignment Blank]\n", cfg.Padding, op.PageNum)
@@ -344,7 +383,7 @@ func run(cfg *Config) error {
 		return nil
 	}
 
-	outF, err := os.Create(cfg.OutputPath)
+	outF, err := os.Create(outputPath)
 	if err != nil {
 		return err
 	}
@@ -384,12 +423,12 @@ func run(cfg *Config) error {
 		if op.SourceIdx != -1 {
 			p = &pages[op.SourceIdx]
 		}
-		
+
 		if op.SourceIdx == -1 || p.IsBlank {
 			if cfg.BlankMode != "generate" {
 				continue
 			}
-			
+
 			// Determine dimensions for blank.
 			var w, h int
 			if op.SourceIdx != -1 && len(p.Images) > 0 {
@@ -428,7 +467,7 @@ func run(cfg *Config) error {
 			if ext == "" {
 				ext = ".jpg"
 			}
-			
+
 			var name string
 			if len(p.Images) == 1 {
 				name = fmt.Sprintf("%0*d%s", cfg.Padding, op.PageNum, ext)
@@ -454,7 +493,7 @@ func run(cfg *Config) error {
 	}
 
 	if cfg.Verbose {
-		log.Printf("Created %s\n", cfg.OutputPath)
+		log.Printf("Created %s\n", outputPath)
 	}
 
 	return nil
