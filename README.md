@@ -2,17 +2,18 @@
 
 A robust Go command-line utility to extract sequential images from fixed-layout EPUBs (illustrated and art books) and archive them into standard ZIP files.
 
-`epub2zip` is designed specifically for fixed-layout digital books, ensuring that the physical page layout (Left-to-Right or Right-to-Left) and alignment are preserved.
+`epub2zip` is designed specifically for fixed-layout digital books, ensuring that the physical page layout (Left-to-Right or Right-to-Left) and structural alignment are preserved.
 
 ## Key Features
 
 - **Fixed-Layout Intelligence**: Automatically detects whether an EPUB is fixed-layout or reflowable. Prevents accidental processing of text-only books.
+- **Structural Book Parts**: Automatically identifies book sections (e.g., Cover, Main Body, TOC, Colophon) using EPUB 3 `landmarks`/`toc` or EPUB 2 `<guide>` metadata.
+- **Human-Readable Naming**: Prefixes filenames with logical part names extracted from navigation links (e.g., `01_表紙_0001.jpg`).
 - **Japanese Layout Support**: Robust handling of `rtl` (Right-to-Left) and `ltr` (Left-to-Right) reading directions.
-- **Spread Alignment**: Automatically inserts alignment blanks based on EPUB spread metadata (`page-spread-left/right`) to ensure images land on the correct physical side in double-page readers.
+- **Spread Alignment**: Automatically inserts alignment blanks (`_blank.png`) to ensure images land on the correct physical side in double-page readers, maintaining continuity across book parts.
 - **Multi-Image Pages**: Handles logical pages that contain multiple image files, extracting them with `[PAGENO]_[INDEX]` naming to ensure no assets are lost.
-- **Metadata Export**: Optionally extracts book metadata (title, author, revision, identifiers) into a root `metadata.json` file.
+- **Metadata Export**: Optionally extracts book metadata into a root `metadata.json` file.
 - **Batch Processing**: Process multiple files at once with internal glob/wildcard support (works on Windows CMD/PowerShell).
-- **Smart Blanks**: Calculates dimensions for alignment blanks by comparing neighboring page areas to maintain visual consistency.
 
 ## Installation
 
@@ -24,9 +25,22 @@ go install github.com/mixcode/epub2zip@latest
 ## Usage
 
 ### Basic Conversion
-Convert an EPUB to a ZIP in the current directory:
+Convert an EPUB to a ZIP in the current directory (prefixes parts by default):
 ```bash
 epub2zip book.epub
+```
+
+### Combined Numbering
+Include the global page number at the start of the filename:
+```bash
+epub2zip --total-numbering book.epub
+# Output: 0004_02_目次_0001.jpg
+```
+
+### Custom Navigation Source
+Select a specific EPUB 3 navigation block for part names:
+```bash
+epub2zip --nav-type landmarks book.epub
 ```
 
 ### Batch Processing
@@ -34,18 +48,6 @@ Convert all EPUBs in a folder and save them to a specific directory:
 ```bash
 mkdir -p archive
 epub2zip -o archive example_epub/*.epub
-```
-
-### Metadata Options
-Include a compact `metadata.json` in the resulting ZIP:
-```bash
-epub2zip -m compact book.epub
-```
-
-### Custom Alignment Blanks
-Generate alignment pages with a specific color (named or hex):
-```bash
-epub2zip -b generate --blank-color "#1a1a1a" book.epub
 ```
 
 ## CLI Flags
@@ -60,14 +62,26 @@ epub2zip -b generate --blank-color "#1a1a1a" book.epub
 | `--blank-color` | Color for blanks: `white`, `black`, `transparent`, or `#HEX` | `transparent` |
 | `-m` | Metadata JSON mode: `none`, `compact`, `pretty` | `pretty` |
 | `-f` | Force execution on reflowable books | `false` |
+| `--prefix-parts` | Prefix filenames with part names | `true` |
+| `--total-numbering` | Include/use global page numbering | `false` |
+| `--nav-type` | EPUB 3 navigation type: `toc` or `landmarks` | `toc` |
+
+## Naming Schemes
+
+The tool supports several naming conventions depending on your flags:
+
+1.  **Default** (`--prefix-parts`): `[PartIdx]_[PartName]_[PartPageNum].ext` (e.g., `02_本編_0001.jpg`)
+2.  **Combined** (`--prefix-parts --total-numbering`): `[GlobalNum]_[PartIdx]_[PartName]_[PartPageNum].ext` (e.g., `0012_02_本編_0010.jpg`)
+3.  **Global Only** (`--total-numbering` only): `[GlobalNum].ext` (e.g., `0012.jpg`)
+4.  **Simple** (both disabled): `[PartPageNum].ext` (resets per part)
 
 ## Alignment Logic
 
 `epub2zip` implements standard Japanese EPUB layout rules:
-- **RTL Books**: Odd pages are on the **Left**, Even pages are on the **Right**.
-- **LTR Books**: Odd pages are on the **Right**, Even pages are on the **Left**.
+- **RTL Books**: Odd physical pages are on the **Left**, Even on the **Right**.
+- **LTR Books**: Odd physical pages are on the **Right**, Even on the **Left**.
 
-If a page's metadata indicates it must be on a specific side (e.g., a "right" spread page), the tool checks if the current sequence number matches that side. If not, it automatically inserts an alignment blank to push the image to the correct position.
+The tool tracks a **global physical index** to ensure that "left" and "right" spread images land on the correct side relative to the start of the book, automatically inserting alignment blanks (`_blank.png`) when necessary. This continuity is preserved even when transitioning between different book parts.
 
 ## License
 
