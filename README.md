@@ -62,6 +62,7 @@ epub2zip -o archive example_epub/*.epub
 | `--blank-color` | Color for blanks: `white`, `black`, `transparent`, or `#HEX` | `transparent` |
 | `-m` | Metadata JSON mode: `none`, `compact`, `pretty` | `pretty` |
 | `-f` | Force execution on reflowable books | `false` |
+| `-y` | Always overwrite existing files without prompting | `false` |
 | `--prefix-parts` | Prefix filenames with part names | `true` |
 | `--total-numbering` | Include/use global page numbering | `false` |
 | `--nav-type` | EPUB 3 navigation type: `toc` or `landmarks` | `toc` |
