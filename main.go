@@ -102,6 +102,7 @@ type Config struct {
 	Force          bool     // Proceed even if the book is detected as reflowable
 	PrefixParts    bool     // Prefix filenames with part names (e.g., 01_cover_0001.jpg)
 	TotalNumbering bool     // Do not reset page numbers for each part
+	NavType        string   // "toc" or "landmarks" (for EPUB 3 navigation)
 }
 
 func main() {
@@ -159,6 +160,7 @@ func parseFlags() *Config {
 	flag.BoolVar(&cfg.Force, "f", false, "Force execution even if reflowable book is detected")
 	flag.BoolVar(&cfg.PrefixParts, "prefix-parts", true, "Prefix filenames with structural part names")
 	flag.BoolVar(&cfg.TotalNumbering, "total-numbering", false, "Use global page numbering instead of per-part reset")
+	flag.StringVar(&cfg.NavType, "nav-type", "toc", "Navigation type to use for parts: toc or landmarks")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [flags] <input.epub> [<input2.epub> ...]\n", os.Args[0])
@@ -241,9 +243,9 @@ func run(cfg *Config, inputPath, outputPath string) error {
 	// 3.5 Extract structural landmarks (if enabled)
 	var landmarks map[string]string
 	if cfg.PrefixParts {
-		landmarks = extractLandmarks(reader, opf, opfPath)
+		landmarks = extractLandmarks(reader, opf, opfPath, cfg.NavType)
 		if cfg.Verbose && len(landmarks) > 0 {
-			log.Printf("Extracted %d structural landmarks\n", len(landmarks))
+			log.Printf("Extracted %d structural landmarks using %s\n", len(landmarks), cfg.NavType)
 		}
 	}
 
@@ -694,11 +696,11 @@ func extractImageFromHTML(r *zip.ReadCloser, path string) ([]string, error) {
 
 // extractLandmarks builds a map of spine item paths to their structural type (e.g., "cover", "bodymatter").
 // It supports both EPUB 3 navigation documents and EPUB 2 guide elements.
-func extractLandmarks(r *zip.ReadCloser, opf *OPF, opfPath string) map[string]string {
+func extractLandmarks(r *zip.ReadCloser, opf *OPF, opfPath string, navType string) map[string]string {
 	landmarks := make(map[string]string)
 	opfBase := filepath.Dir(opfPath)
 
-	// 1. Try EPUB 3 Navigation Document (Landmarks)
+	// 1. Try EPUB 3 Navigation Document
 	var navPath string
 	for _, item := range opf.Manifest {
 		if strings.Contains(item.Properties, "nav") {
@@ -716,31 +718,33 @@ func extractLandmarks(r *zip.ReadCloser, opf *OPF, opfPath string) map[string]st
 				var fNode func(*html.Node)
 				fNode = func(n *html.Node) {
 					if n.Type == html.ElementNode && n.Data == "nav" {
-						isLandmarks := false
+						isTarget := false
 						for _, a := range n.Attr {
-							if a.Key == "epub:type" && a.Val == "landmarks" {
-								isLandmarks = true
+							if a.Key == "epub:type" && a.Val == navType {
+								isTarget = true
 								break
 							}
 						}
-						if isLandmarks {
+						if isTarget {
 							// Extract <a> tags inside this <nav>
 							var fAnchor func(*html.Node)
 							fAnchor = func(an *html.Node) {
 								if an.Type == html.ElementNode && an.Data == "a" {
-									var href, eType string
+									var href string
 									for _, a := range an.Attr {
 										if a.Key == "href" {
 											href = a.Val
-										} else if a.Key == "epub:type" {
-											eType = a.Val
+											break
 										}
 									}
-									if href != "" && eType != "" {
-										// Normalize path (remove anchors)
-										cleanHref := strings.Split(href, "#")[0]
-										absPath := filepath.ToSlash(filepath.Join(filepath.Dir(navPath), cleanHref))
-										landmarks[absPath] = eType
+									if href != "" {
+										text := cleanName(getNodeText(an))
+										if text != "" {
+											// Normalize path (remove anchors)
+											cleanHref := strings.Split(href, "#")[0]
+											absPath := filepath.ToSlash(filepath.Join(filepath.Dir(navPath), cleanHref))
+											landmarks[absPath] = text
+										}
 									}
 								}
 								for c := an.FirstChild; c != nil; c = c.NextSibling {
@@ -764,11 +768,47 @@ func extractLandmarks(r *zip.ReadCloser, opf *OPF, opfPath string) map[string]st
 		for _, ref := range opf.Guide {
 			cleanHref := strings.Split(ref.Href, "#")[0]
 			absPath := filepath.ToSlash(filepath.Join(opfBase, cleanHref))
-			landmarks[absPath] = ref.Type
+			name := ref.Title
+			if name == "" {
+				name = ref.Type
+			}
+			landmarks[absPath] = cleanName(name)
 		}
 	}
 
 	return landmarks
+}
+
+// getNodeText extracts all text from an HTML node and its children.
+func getNodeText(n *html.Node) string {
+	if n.Type == html.TextNode {
+		return n.Data
+	}
+	var text string
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		text += getNodeText(c)
+	}
+	return text
+}
+
+// cleanName removes or replaces non-filename-safe characters.
+func cleanName(s string) string {
+	s = strings.TrimSpace(s)
+	// Replace spaces and common delimiters with underscores
+	s = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r > 127 {
+			return r
+		}
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			return '_'
+		}
+		return -1 // Remove other characters
+	}, s)
+	// Collapse multiple underscores
+	for strings.Contains(s, "__") {
+		s = strings.ReplaceAll(s, "__", "_")
+	}
+	return strings.Trim(s, "_")
 }
 
 // isFixedLayout checks the book metadata for properties indicating a fixed layout.
