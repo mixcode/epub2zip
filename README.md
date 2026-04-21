@@ -1,8 +1,8 @@
 # epub2zip
 
-A robust Go command-line utility to extract sequential images from fixed-layout EPUBs (manga, comics, and illustrations) and archive them into standard ZIP files.
+A robust Go command-line utility to extract sequential images from fixed-layout EPUBs (illustrated and art books) and archive them into standard ZIP files.
 
-`epub2zip` is designed specifically for digital comics and art books, ensuring that the physical page layout (Left-to-Right or Right-to-Left) and alignment are preserved.
+`epub2zip` is designed specifically for fixed-layout digital books, ensuring that the physical page layout (Left-to-Right or Right-to-Left) and alignment are preserved.
 
 ## Key Features
 

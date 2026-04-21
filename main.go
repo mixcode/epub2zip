@@ -630,7 +630,7 @@ func isFixedLayout(m Metadata) bool {
 		if meta.Name == "fixed-layout" && meta.Content == "true" {
 			return true
 		}
-		// Presence of a viewport usually implies fixed layout in manga/comics.
+		// Presence of a viewport usually implies fixed layout in these types of books.
 		if strings.Contains(meta.Property, "viewport") {
 			return true
 		}

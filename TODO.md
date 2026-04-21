@@ -1,7 +1,7 @@
 # TODO: epub2zip
 
 ## Overview
-A robust Go CLI utility to extract sequential images from fixed-layout EPUBs (manga, comics, illustrations) into standard ZIP archives.
+A robust Go CLI utility to extract sequential images from fixed-layout EPUBs (illustrated and art books) into standard ZIP archives.
 
 ## Completed Features
 - [x] **EPUB Parsing**: Robust extraction of OPF manifest and spine reading order.
@@ -17,7 +17,7 @@ A robust Go CLI utility to extract sequential images from fixed-layout EPUBs (ma
 - [ ] **Image Optimization**: Add a flag to optionally resize or re-compress images (e.g., convert PNG to JPEG or WebP) during extraction to reduce ZIP size.
 - [ ] **OCR Integration**: Optional OCR pass on extracted images to generate a companion text file or search index.
 - [ ] **Enhanced Reflow Handling**: Better heuristics for "mostly image" reflowable books where text is minimal (e.g., art books with short captions).
-- [ ] **ZIP Comment Support**: Store book metadata in the ZIP archive comment field for better compatibility with some comic readers.
+- [ ] **ZIP Comment Support**: Store book metadata in the ZIP archive comment field for better compatibility with specialized book readers.
 - [ ] **Parallel Processing**: Use Go goroutines to process multiple EPUB files in parallel for significantly faster batch conversions.
 - [ ] **Progress Bar**: Implement a CLI progress bar for large books or batch operations.
 - [ ] **Archive Verification**: Add a post-process check to ensure the generated ZIP is valid and contains the expected number of files.
