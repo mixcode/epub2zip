@@ -446,7 +446,7 @@ func run(cfg *Config, inputPath, outputPath string) error {
 				}
 			}
 
-			name := fmt.Sprintf("%0*d.png", cfg.Padding, op.PageNum)
+			name := fmt.Sprintf("%0*d_blank.png", cfg.Padding, op.PageNum)
 			writer, err := archive.Create(name)
 			if err != nil {
 				return err
