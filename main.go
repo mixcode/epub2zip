@@ -336,10 +336,11 @@ func run(cfg *Config, inputPath, outputPath string) error {
 	// If a page's metadata says it's a 'right' page but the sequence is currently 'odd' in RTL,
 	// we must insert a blank to shift it to an 'even' position.
 	type OutputPage struct {
-		SourceIdx int    // index in 'pages' slice, or -1 for alignment blanks
-		PageNum   int    // per-part page number (or global if total-numbering)
-		PartName  string // e.g., "cover", "bodymatter"
-		PartIdx   int    // 1, 2, 3...
+		SourceIdx     int    // index in 'pages' slice, or -1 for alignment blanks
+		PartPageNum   int    // per-part page number
+		GlobalPageNum int    // absolute sequential number
+		PartName      string // e.g., "cover", "bodymatter"
+		PartIdx       int    // 1, 2, 3...
 	}
 	var outputPages []OutputPage
 
@@ -347,8 +348,9 @@ func run(cfg *Config, inputPath, outputPath string) error {
 
 	currentPartName := ""
 	currentPartIdx := 0
-	currentPageNum := 1    // Label number (resets per part)
-	globalPhysicalIdx := 1 // Physical position (never resets, includes blanks)
+	partPageNum := 1    // resets per part
+	globalPageNum := 1  // never resets
+	globalPhysicalIdx := 1 // for alignment
 
 	for i := range pages {
 		p := &pages[i]
@@ -359,9 +361,7 @@ func run(cfg *Config, inputPath, outputPath string) error {
 				if partType != currentPartName {
 					currentPartName = partType
 					currentPartIdx++
-					if !cfg.TotalNumbering {
-						currentPageNum = 1 // Reset label for new part
-					}
+					partPageNum = 1 // Reset for new part
 					if cfg.Verbose {
 						log.Printf("Part %d Started: %s (at source page %d, physical pos %d)\n", currentPartIdx, currentPartName, i+1, globalPhysicalIdx)
 					}
@@ -371,202 +371,219 @@ func run(cfg *Config, inputPath, outputPath string) error {
 
 		needsPadding := false
 		if isRTL {
-			// In RTL: Odd physical index is Left, Even is Right.
 			if p.Spread == "right" && globalPhysicalIdx%2 != 0 {
-				needsPadding = true // 'Right' must be Even
+				needsPadding = true
 			} else if p.Spread == "left" && globalPhysicalIdx%2 == 0 {
-				needsPadding = true // 'Left' must be Odd
+				needsPadding = true
 			}
 		} else {
-			// In LTR: Odd physical index is Right, Even is Left.
 			if p.Spread == "left" && globalPhysicalIdx%2 != 0 {
-				needsPadding = true // 'Left' must be Even
+				needsPadding = true
 			} else if p.Spread == "right" && globalPhysicalIdx%2 == 0 {
-				needsPadding = true // 'Right' must be Odd
+				needsPadding = true
 			}
 		}
 
 		if needsPadding {
 			if cfg.BlankMode == "generate" || cfg.BlankMode == "skip" {
-				if cfg.Verbose {
-					log.Printf("Aligning physical pos %d (Source %d) due to %s spread\n", globalPhysicalIdx, i+1, p.Spread)
-				}
 				outputPages = append(outputPages, OutputPage{
-					SourceIdx: -1,
-					PageNum:   currentPageNum,
-					PartName:  currentPartName,
-					PartIdx:   currentPartIdx,
+					SourceIdx:     -1,
+					PartPageNum:   partPageNum,
+					GlobalPageNum: globalPageNum,
+					PartName:      currentPartName,
+					PartIdx:       currentPartIdx,
 				})
-				currentPageNum++
+				partPageNum++
+				globalPageNum++
 				globalPhysicalIdx++
 			}
 		}
 
 		outputPages = append(outputPages, OutputPage{
-			SourceIdx: i,
-			PageNum:   currentPageNum,
-			PartName:  currentPartName,
-			PartIdx:   currentPartIdx,
+			SourceIdx:     i,
+			PartPageNum:   partPageNum,
+			GlobalPageNum: globalPageNum,
+			PartName:      currentPartName,
+			PartIdx:       currentPartIdx,
 		})
-		currentPageNum++
+		partPageNum++
+		globalPageNum++
 		globalPhysicalIdx++
 	}
 
 	// 6. Handle blank pages dimensions for those with SourceIdx == -1
 	// (Reuse logic from previous step 5 but adapted)
 
-	// 7. Output Generation (DryRun or ZIP write).
-	if cfg.DryRun {
-		fmt.Printf("Dry run: planned output to %s (Direction: %s)\n", outputPath, opf.Spine.Direction)
-		for _, op := range outputPages {
-			partInfo := ""
-			if op.PartName != "" && cfg.PrefixParts {
-				partInfo = fmt.Sprintf("[%02d_%s] ", op.PartIdx, op.PartName)
-			}
+	// generateFileName constructs the output filename based on part info and numbering settings.
+	func generateFileName(cfg *Config, op OutputPage, imgIdx int, isBlank bool, ext string) string {
+		pageNum := op.PartPageNum
+		if cfg.TotalNumbering && !cfg.PrefixParts {
+			pageNum = op.GlobalPageNum
+		}
 
-			if op.SourceIdx == -1 {
-				fmt.Printf("  Page %s%0*d: [Alignment Blank]\n", partInfo, cfg.Padding, op.PageNum)
-			} else {
-				p := pages[op.SourceIdx]
-				if p.IsBlank {
-					fmt.Printf("  Page %s%0*d: [Skipped Blank]\n", partInfo, cfg.Padding, op.PageNum)
+		suffix := ""
+		if isBlank {
+			suffix = "_blank"
+		}
+		if imgIdx > 0 {
+			suffix += fmt.Sprintf("_%d", imgIdx)
+		}
+
+		if cfg.PrefixParts && op.PartName != "" {
+			if cfg.TotalNumbering {
+				// Global_PartIdx_PartName_PartPageNum
+				return fmt.Sprintf("%0*d_%02d_%s_%0*d%s%s", cfg.Padding, op.GlobalPageNum, op.PartIdx, op.PartName, cfg.Padding, op.PartPageNum, suffix, ext)
+			}
+			// PartIdx_PartName_PartPageNum
+			return fmt.Sprintf("%02d_%s_%0*d%s%s", op.PartIdx, op.PartName, cfg.Padding, op.PartPageNum, suffix, ext)
+		}
+
+		// Just padded number
+		return fmt.Sprintf("%0*d%s%s", cfg.Padding, pageNum, suffix, ext)
+	}
+
+	// run is the entry point for the tool's core logic.
+	...
+		// 7. Output Generation (DryRun or ZIP write).
+		if cfg.DryRun {
+			fmt.Printf("Dry run: planned output to %s (Direction: %s)\n", outputPath, opf.Spine.Direction)
+			for _, op := range outputPages {
+				if op.SourceIdx == -1 {
+					name := generateFileName(cfg, op, 0, true, ".png")
+					fmt.Printf("  Page %s: [Alignment Blank]\n", name)
 				} else {
-					if len(p.Images) == 1 {
-						fmt.Printf("  Page %s%0*d: %s (%s)\n", partInfo, cfg.Padding, op.PageNum, p.Images[0].Path, p.Spread)
+					p := pages[op.SourceIdx]
+					if p.IsBlank {
+						name := generateFileName(cfg, op, 0, true, ".png")
+						fmt.Printf("  Page %s: [Skipped Blank]\n", name)
 					} else {
-						fmt.Printf("  Page %s%0*d: (%d images) (%s)\n", partInfo, cfg.Padding, op.PageNum, len(p.Images), p.Spread)
 						for j, img := range p.Images {
-							fmt.Printf("    [%d]: %s\n", j+1, img.Path)
+							imgIdx := 0
+							if len(p.Images) > 1 {
+								imgIdx = j + 1
+							}
+							ext := strings.ToLower(filepath.Ext(img.Path))
+							if ext == "" {
+								ext = ".jpg"
+							}
+							name := generateFileName(cfg, op, imgIdx, false, ext)
+							fmt.Printf("  Page %s: %s (%s)\n", name, img.Path, p.Spread)
 						}
 					}
 				}
 			}
-		}
-		return nil
-	}
-
-	outF, err := os.Create(outputPath)
-	if err != nil {
-		return err
-	}
-	defer outF.Close()
-
-	archive := zip.NewWriter(outF)
-	defer archive.Close()
-
-	// 6. Add metadata.json if requested.
-	if cfg.MetadataJSON != "none" {
-		var data []byte
-		var err error
-		if cfg.MetadataJSON == "pretty" {
-			data, err = json.MarshalIndent(opf.Metadata, "", "  ")
-		} else {
-			data, err = json.Marshal(opf.Metadata)
-		}
-		if err != nil {
-			return fmt.Errorf("failed to marshal metadata: %w", err)
+			return nil
 		}
 
-		w, err := archive.Create("metadata.json")
+		outF, err := os.Create(outputPath)
 		if err != nil {
 			return err
 		}
-		if _, err := w.Write(data); err != nil {
-			return err
-		}
-		if cfg.Verbose {
-			log.Printf("Added metadata.json (%s mode)\n", cfg.MetadataJSON)
-		}
-	}
+		defer outF.Close()
 
-	// Final ZIP loop: copy images and generate necessary blanks.
-	for _, op := range outputPages {
-		var p *Page
-		if op.SourceIdx != -1 {
-			p = &pages[op.SourceIdx]
+		archive := zip.NewWriter(outF)
+		defer archive.Close()
+
+		// 6. Add metadata.json if requested.
+		if cfg.MetadataJSON != "none" {
+			var data []byte
+			var err error
+			if cfg.MetadataJSON == "pretty" {
+				data, err = json.MarshalIndent(opf.Metadata, "", "  ")
+			} else {
+				data, err = json.Marshal(opf.Metadata)
+			}
+			if err != nil {
+				return fmt.Errorf("failed to marshal metadata: %w", err)
+			}
+
+			w, err := archive.Create("metadata.json")
+			if err != nil {
+				return err
+			}
+			if _, err := w.Write(data); err != nil {
+				return err
+			}
+			if cfg.Verbose {
+				log.Printf("Added metadata.json (%s mode)\n", cfg.MetadataJSON)
+			}
 		}
 
-		if op.SourceIdx == -1 || p.IsBlank {
-			if cfg.BlankMode != "generate" {
+		// Final ZIP loop: copy images and generate necessary blanks.
+		for _, op := range outputPages {
+			var p *Page
+			if op.SourceIdx != -1 {
+				p = &pages[op.SourceIdx]
+			}
+
+			if op.SourceIdx == -1 || p.IsBlank {
+				if cfg.BlankMode != "generate" {
+					continue
+				}
+
+				// Determine dimensions for blank.
+				var w, h int
+				if op.SourceIdx != -1 && len(p.Images) > 0 {
+					w, h = p.Images[0].Width, p.Images[0].Height
+				} else {
+					// Search neighbors for dimension reference.
+					for j := range pages {
+						if !pages[j].IsBlank && len(pages[j].Images) > 0 {
+							w, h = pages[j].Images[0].Width, pages[j].Images[0].Height
+							break
+						}
+					}
+					if w == 0 {
+						w, h = 800, 1200
+					}
+				}
+
+				name := generateFileName(cfg, op, 0, true, ".png")
+
+				writer, err := archive.Create(name)
+				if err != nil {
+					return err
+				}
+				col, err := parseColor(cfg.BlankColor)
+				if err != nil {
+					return err
+				}
+				if err := generateBlankImage(writer, w, h, col); err != nil {
+					return err
+				}
 				continue
 			}
 
-			// Determine dimensions for blank.
-			var w, h int
-			if op.SourceIdx != -1 && len(p.Images) > 0 {
-				w, h = p.Images[0].Width, p.Images[0].Height
-			} else {
-				// Search neighbors for dimension reference.
-				for j := range pages {
-					if !pages[j].IsBlank && len(pages[j].Images) > 0 {
-						w, h = pages[j].Images[0].Width, pages[j].Images[0].Height
-						break
-					}
+			// Real images
+			for j, img := range p.Images {
+				ext := strings.ToLower(filepath.Ext(img.Path))
+				if ext == "" {
+					ext = ".jpg"
 				}
-				if w == 0 {
-					w, h = 800, 1200
+
+				imgIdx := 0
+				if len(p.Images) > 1 {
+					imgIdx = j + 1
+				}
+				name := generateFileName(cfg, op, imgIdx, false, ext)
+
+				writer, err := archive.Create(name)
+				if err != nil {
+					return err
+				}
+
+				rc, err := reader.Open(img.Path)
+				if err != nil {
+					return err
+				}
+				_, err = io.Copy(writer, rc)
+				rc.Close()
+				if err != nil {
+					return err
 				}
 			}
-
-			var name string
-			if op.PartName != "" && cfg.PrefixParts {
-				name = fmt.Sprintf("%02d_%s_%0*d_blank.png", op.PartIdx, op.PartName, cfg.Padding, op.PageNum)
-			} else {
-				name = fmt.Sprintf("%0*d_blank.png", cfg.Padding, op.PageNum)
-			}
-
-			writer, err := archive.Create(name)
-			if err != nil {
-				return err
-			}
-			col, err := parseColor(cfg.BlankColor)
-			if err != nil {
-				return err
-			}
-			if err := generateBlankImage(writer, w, h, col); err != nil {
-				return err
-			}
-			continue
 		}
 
-		// Real images
-		for j, img := range p.Images {
-			ext := strings.ToLower(filepath.Ext(img.Path))
-			if ext == "" {
-				ext = ".jpg"
-			}
-
-			var name string
-			if op.PartName != "" && cfg.PrefixParts {
-				if len(p.Images) == 1 {
-					name = fmt.Sprintf("%02d_%s_%0*d%s", op.PartIdx, op.PartName, cfg.Padding, op.PageNum, ext)
-				} else {
-					name = fmt.Sprintf("%02d_%s_%0*d_%d%s", op.PartIdx, op.PartName, cfg.Padding, op.PageNum, j+1, ext)
-				}
-			} else {
-				if len(p.Images) == 1 {
-					name = fmt.Sprintf("%0*d%s", cfg.Padding, op.PageNum, ext)
-				} else {
-					name = fmt.Sprintf("%0*d_%d%s", cfg.Padding, op.PageNum, j+1, ext)
-				}
-			}
-
-			writer, err := archive.Create(name)
-			if err != nil {
-				return err
-			}
-
-			rc, err := reader.Open(img.Path)
-			if err != nil {
-				return err
-			}
-			_, err = io.Copy(writer, rc)
-			rc.Close()
-			if err != nil {
-				return err
-			}
-		}
-	}
 	if cfg.Verbose {
 		log.Printf("Created %s\n", outputPath)
 	}
