@@ -84,18 +84,19 @@ type Item struct {
 // --- Configuration ---
 
 type Config struct {
-	InputPaths     []string
-	OutputPath     string
-	Padding        int
-	Verbose        bool
-	DryRun         bool
-	BlankMode      string
-	BlankColor     string
-	MetadataJSON   string
-	Force          bool
-	PrefixParts    bool
-	TotalNumbering bool
-	NavType        string
+	InputPaths      []string
+	OutputPath      string
+	Padding         int
+	Verbose         bool
+	DryRun          bool
+	BlankMode       string
+	BlankColor      string
+	MetadataJSON    string
+	Force           bool
+	PrefixParts     bool
+	TotalNumbering  bool
+	NavType         string
+	AlwaysOverwrite bool
 }
 
 // OutputPage represents a page to be written to the ZIP.
@@ -133,6 +134,16 @@ func main() {
 			os.Exit(1)
 		}
 
+		// Overwrite check
+		if !cfg.DryRun && !cfg.AlwaysOverwrite {
+			if _, err := os.Stat(targetOutput); err == nil {
+				if !askOverwrite(targetOutput) {
+					fmt.Printf("Skipping %s\n", targetOutput)
+					continue
+				}
+			}
+		}
+
 		if cfg.Verbose {
 			log.Printf("Processing: %s -> %s\n", inputPath, targetOutput)
 		}
@@ -141,6 +152,14 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error processing %s: %v\n", inputPath, err)
 		}
 	}
+}
+
+func askOverwrite(path string) bool {
+	fmt.Printf("File '%s' already exists. Overwrite? [y/N]: ", path)
+	var response string
+	fmt.Scanln(&response)
+	response = strings.ToLower(strings.TrimSpace(response))
+	return response == "y" || response == "yes"
 }
 
 func parseFlags() *Config {
@@ -156,6 +175,7 @@ func parseFlags() *Config {
 	flag.BoolVar(&cfg.PrefixParts, "prefix-parts", true, "Prefix filenames with structural part names")
 	flag.BoolVar(&cfg.TotalNumbering, "total-numbering", false, "Include global page numbering")
 	flag.StringVar(&cfg.NavType, "nav-type", "toc", "Navigation type: toc or landmarks")
+	flag.BoolVar(&cfg.AlwaysOverwrite, "y", false, "Always overwrite existing files without prompting")
 
 	flag.Parse()
 
@@ -363,11 +383,10 @@ func run(cfg *Config, inputPath, outputPath string) error {
 	if cfg.DryRun {
 		fmt.Printf("Dry run: planned output to %s (Direction: %s)\n", outputPath, opf.Spine.Direction)
 		for _, op := range outputPages {
+			name := generateFileName(cfg, op, 0, op.SourceIdx == -1 || (op.SourceIdx != -1 && pages[op.SourceIdx].IsBlank), ".png")
 			if op.SourceIdx == -1 {
-				name := generateFileName(cfg, op, 0, true, ".png")
 				fmt.Printf("  Page %s: [Alignment Blank]\n", name)
 			} else if pages[op.SourceIdx].IsBlank {
-				name := generateFileName(cfg, op, 0, true, ".png")
 				fmt.Printf("  Page %s: [Skipped Blank]\n", name)
 			} else {
 				for j, img := range pages[op.SourceIdx].Images {
@@ -517,7 +536,7 @@ func generateBlankImage(w io.Writer, width, height int, col color.Color) error {
 func findOPF(r *zip.ReadCloser) (string, error) {
 	f, err := r.Open("META-INF/container.xml")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("META-INF/container.xml not found")
 	}
 	defer f.Close()
 	var c Container
