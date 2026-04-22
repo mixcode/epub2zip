@@ -162,6 +162,8 @@ func askOverwrite(path string) bool {
 	return response == "y" || response == "yes"
 }
 
+// parseFlags initializes and returns the configuration based on CLI arguments.
+// It sets up all available switches including output paths, numbering schemes, and blank page generation modes.
 func parseFlags() *Config {
 	cfg := &Config{}
 	flag.StringVar(&cfg.OutputPath, "o", "", "Output zip filename or directory")
@@ -198,6 +200,8 @@ func parseFlags() *Config {
 	return cfg
 }
 
+// run is the entry point for the tool's core logic.
+// It orchestrates the EPUB reading, page extraction, logical part alignment, and final ZIP generation phases.
 func run(cfg *Config, inputPath, outputPath string) error {
 	if _, err := parseColor(cfg.BlankColor); err != nil {
 		return err
@@ -480,6 +484,8 @@ func run(cfg *Config, inputPath, outputPath string) error {
 	return nil
 }
 
+// generateFileName constructs the output filename based on structural part info and the chosen numbering settings.
+// It handles cases for combined global numbering, part-only prefixing, and suffixing for multi-image pages or generated blanks.
 func generateFileName(cfg *Config, op OutputPage, imgIdx int, isBlank bool, ext string) string {
 	suffix := ""
 	if isBlank {
@@ -504,6 +510,7 @@ func generateFileName(cfg *Config, op OutputPage, imgIdx int, isBlank bool, ext 
 	return fmt.Sprintf("%0*d%s%s", cfg.Padding, op.PartPageNum, suffix, ext)
 }
 
+// parseColor converts a string (named color like "white" or hex code like "#RRGGBB") into a color.Color interface.
 func parseColor(s string) (color.Color, error) {
 	switch strings.ToLower(s) {
 	case "transparent":
@@ -527,12 +534,14 @@ func parseColor(s string) (color.Color, error) {
 	return nil, fmt.Errorf("unknown color: %s", s)
 }
 
+// generateBlankImage creates a solid-color PNG image of the specified dimensions and writes it to the provided writer.
 func generateBlankImage(w io.Writer, width, height int, col color.Color) error {
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	draw.Draw(img, img.Bounds(), &image.Uniform{col}, image.Point{}, draw.Src)
 	return png.Encode(w, img)
 }
 
+// findOPF reads the META-INF/container.xml file within the EPUB archive to locate the root OPF package file.
 func findOPF(r *zip.ReadCloser) (string, error) {
 	f, err := r.Open("META-INF/container.xml")
 	if err != nil {
@@ -547,6 +556,7 @@ func findOPF(r *zip.ReadCloser) (string, error) {
 	return c.Rootfiles[0].FullPath, nil
 }
 
+// parseOPF decodes the specified OPF XML file into an accessible Go struct, extracting metadata, manifest, and spine.
 func parseOPF(r *zip.ReadCloser, path string) (*OPF, error) {
 	f, err := r.Open(path)
 	if err != nil {
@@ -558,6 +568,8 @@ func parseOPF(r *zip.ReadCloser, path string) (*OPF, error) {
 	return &opf, nil
 }
 
+// extractImageFromHTML parses an XHTML document to find all embedded <img> or <svg><image> elements.
+// This is necessary because many fixed-layout EPUBs wrap their images in XHTML documents rather than referencing them directly in the spine.
 func extractImageFromHTML(r *zip.ReadCloser, path string) ([]string, error) {
 	f, err := r.Open(path)
 	if err != nil {
@@ -594,6 +606,8 @@ func extractImageFromHTML(r *zip.ReadCloser, path string) ([]string, error) {
 	return imgPaths, nil
 }
 
+// extractLandmarks builds a map of spine item paths to their structural part name (e.g., "cover", "bodymatter").
+// It supports both EPUB 3 navigation documents (TOC or landmarks) and fallback EPUB 2 <guide> elements.
 func extractLandmarks(r *zip.ReadCloser, opf *OPF, opfPath string, navType string) map[string]string {
 	landmarks := make(map[string]string)
 	opfBase := filepath.Dir(opfPath)
@@ -665,6 +679,7 @@ func extractLandmarks(r *zip.ReadCloser, opf *OPF, opfPath string, navType strin
 	return landmarks
 }
 
+// getNodeText recursively extracts and concatenates all text content from an HTML node and its children.
 func getNodeText(n *html.Node) string {
 	if n.Type == html.TextNode {
 		return n.Data
@@ -676,6 +691,8 @@ func getNodeText(n *html.Node) string {
 	return text
 }
 
+// cleanFilename removes or replaces characters that are illegal or problematic in OS filesystems.
+// It converts characters like '/', ':', and '*' to their full-width (Japanese) equivalents to preserve readability without breaking paths.
 func cleanFilename(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.Map(func(r rune) rune {
@@ -717,6 +734,7 @@ func cleanFilename(s string) string {
 	return strings.Trim(s, "_")
 }
 
+// isFixedLayout inspects the EPUB's metadata to determine if the book is fixed-layout or reflowable text.
 func isFixedLayout(m Metadata) bool {
 	for _, meta := range m.Meta {
 		if meta.Property == "rendition:layout" && meta.Value == "pre-paginated" {
@@ -732,6 +750,8 @@ func isFixedLayout(m Metadata) bool {
 	return false
 }
 
+// getImageDimensions efficiently decodes the headers of an image file within the ZIP stream to retrieve its width and height,
+// without loading the entire image data into memory.
 func getImageDimensions(r *zip.ReadCloser, path string) (int, int, error) {
 	f, err := r.Open(path)
 	if err != nil {
