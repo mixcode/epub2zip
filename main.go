@@ -629,7 +629,7 @@ func extractLandmarks(r *zip.ReadCloser, opf *OPF, opfPath string, navType strin
 									}
 								}
 								if href != "" {
-									text := cleanName(getNodeText(an))
+									text := cleanFilename(getNodeText(an))
 									if text != "" {
 										cleanHref := strings.Split(href, "#")[0]
 										absPath := filepath.ToSlash(filepath.Join(filepath.Dir(navPath), cleanHref))
@@ -659,7 +659,7 @@ func extractLandmarks(r *zip.ReadCloser, opf *OPF, opfPath string, navType strin
 			if name == "" {
 				name = ref.Type
 			}
-			landmarks[absPath] = cleanName(name)
+			landmarks[absPath] = cleanFilename(name)
 		}
 	}
 	return landmarks
@@ -676,16 +676,40 @@ func getNodeText(n *html.Node) string {
 	return text
 }
 
-func cleanName(s string) string {
+func cleanFilename(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.Map(func(r rune) rune {
+		// Convert illegal OS path characters to fullwidth variants
+		switch r {
+		case '/':
+			return '／'
+		case '\\':
+			return '＼'
+		case ':':
+			return '：'
+		case '*':
+			return '＊'
+		case '?':
+			return '？'
+		case '"':
+			return '”'
+		case '<':
+			return '＜'
+		case '>':
+			return '＞'
+		case '|':
+			return '｜'
+		}
+
+		// Keep alphanumeric, dash, underscore, and non-ASCII (including Japanese/fullwidth)
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r > 127 {
 			return r
 		}
+		// Replace whitespace with underscore
 		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
 			return '_'
 		}
-		return -1
+		return -1 // Remove other unhandled characters
 	}, s)
 	for strings.Contains(s, "__") {
 		s = strings.ReplaceAll(s, "__", "_")
