@@ -313,7 +313,7 @@ func run(cfg *Config, inputPath, outputPath string) error {
 	}
 
 	isRTL := opf.Spine.Direction == "rtl"
-	currentPartName := ""
+	currentPartName := "PRELIM"
 	currentPartIdx := 0
 	partPageNum := 1
 	globalPageNum := 1
