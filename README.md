@@ -15,6 +15,7 @@ A robust Go command-line utility to extract sequential images from fixed-layout 
 - **Metadata Export**: Optionally extracts book metadata into a root `metadata.json` file.
 - **Batch Processing**: Process multiple files at once with internal glob/wildcard support (works on Windows CMD/PowerShell).
 - **Zero-Decompress Raw Copying**: Speeds up ZIP generation by up to 60x by copying raw compressed data blocks directly from the EPUB container, completely bypassing CPU-intensive decompression and re-compression.
+- **Strict UTF-8 Encoding**: Enforces standard UTF-8 filename headers (`0x800` bit 11) for all ZIP entries, ensuring renamed files extract correctly across all non-Latin operating system locales without filename corruption (mojibake).
 
 ## Installation
 
