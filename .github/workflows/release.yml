@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Build and Package Binaries
+        id: build
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          
+          LINUX_FILE="epub2zip-${TAG_NAME}-linux-amd64.tar.gz"
+          WIN_FILE="epub2zip-${TAG_NAME}-windows-amd64.zip"
+          MAC_FILE="epub2zip-${TAG_NAME}-darwin-arm64.tar.gz"
+          
+          # 1. Linux x64
+          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o epub2zip main.go
+          tar -czf "$LINUX_FILE" epub2zip
+          rm epub2zip
+          
+          # 2. Windows x64
+          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o epub2zip.exe main.go
+          zip "$WIN_FILE" epub2zip.exe
+          rm epub2zip.exe
+          
+          # 3. macOS Apple Silicon (darwin/arm64)
+          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o epub2zip main.go
+          tar -czf "$MAC_FILE" epub2zip
+          rm epub2zip
+          
+          # Output filenames for upload step
+          echo "linux_file=$LINUX_FILE" >> $GITHUB_OUTPUT
+          echo "win_file=$WIN_FILE" >> $GITHUB_OUTPUT
+          echo "mac_file=$MAC_FILE" >> $GITHUB_OUTPUT
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.build.outputs.linux_file }}
+            ${{ steps.build.outputs.win_file }}
+            ${{ steps.build.outputs.mac_file }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

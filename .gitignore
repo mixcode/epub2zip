@@ -1,6 +1,7 @@
 
 .*
 _*
+!.github/
 
 *.epub
 *.zip
