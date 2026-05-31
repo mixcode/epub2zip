@@ -19,6 +19,10 @@ A robust Go command-line utility to extract sequential images from fixed-layout 
 
 ## Installation
 
+### Pre-compiled Binaries
+Pre-compiled binaries for Linux (x64), Windows (x64), and macOS (Apple Silicon) are available on the [GitHub Releases](https://github.com/mixcode/epub2zip/releases) page.
+
+### Build from Source
 ```bash
 go install github.com/mixcode/epub2zip@latest
 ```
