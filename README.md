@@ -14,6 +14,7 @@ A robust Go command-line utility to extract sequential images from fixed-layout 
 - **Multi-Image Pages**: Handles logical pages that contain multiple image files, extracting them with `[PAGENO]_[INDEX]` naming to ensure no assets are lost.
 - **Metadata Export**: Optionally extracts book metadata into a root `metadata.json` file.
 - **Batch Processing**: Process multiple files at once with internal glob/wildcard support (works on Windows CMD/PowerShell).
+- **Zero-Decompress Raw Copying**: Speeds up ZIP generation by up to 60x by copying raw compressed data blocks directly from the EPUB container, completely bypassing CPU-intensive decompression and re-compression.
 
 ## Installation
 
@@ -61,6 +62,7 @@ epub2zip -o archive example_epub/*.epub
 | `-b` | Blank page handling: `skip` or `generate` | `generate` |
 | `--blank-color` | Color for blanks: `white`, `black`, `transparent`, or `#HEX` | `transparent` |
 | `-m` | Metadata JSON mode: `none`, `compact`, `pretty` | `pretty` |
+| `-c` | Compression mode: `raw` (copy compressed blocks), `deflate` (re-compress), or `store` (uncompressed) | `raw` |
 | `-f` | Force execution on reflowable books | `false` |
 | `-y` | Always overwrite existing files without prompting | `false` |
 | `--prefix-parts` | Prefix filenames with part names | `true` |

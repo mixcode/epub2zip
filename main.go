@@ -97,6 +97,7 @@ type Config struct {
 	TotalNumbering  bool
 	NavType         string
 	AlwaysOverwrite bool
+	Compression     string
 }
 
 // OutputPage represents a page to be written to the ZIP.
@@ -178,6 +179,7 @@ func parseFlags() *Config {
 	flag.BoolVar(&cfg.TotalNumbering, "total-numbering", false, "Include global page numbering")
 	flag.StringVar(&cfg.NavType, "nav-type", "toc", "Navigation type: toc or landmarks")
 	flag.BoolVar(&cfg.AlwaysOverwrite, "y", false, "Always overwrite existing files without prompting")
+	flag.StringVar(&cfg.Compression, "c", "raw", "Compression method: raw, deflate, or store")
 
 	flag.Parse()
 
@@ -203,6 +205,13 @@ func parseFlags() *Config {
 // run is the entry point for the tool's core logic.
 // It orchestrates the EPUB reading, page extraction, logical part alignment, and final ZIP generation phases.
 func run(cfg *Config, inputPath, outputPath string) error {
+	switch cfg.Compression {
+	case "raw", "deflate", "store":
+		// valid
+	default:
+		return fmt.Errorf("invalid compression method: %s (must be raw, deflate, or store)", cfg.Compression)
+	}
+
 	if _, err := parseColor(cfg.BlankColor); err != nil {
 		return err
 	}
@@ -212,6 +221,11 @@ func run(cfg *Config, inputPath, outputPath string) error {
 		return fmt.Errorf("failed to open epub: %w", err)
 	}
 	defer reader.Close()
+
+	fileMap := make(map[string]*zip.File)
+	for _, f := range reader.File {
+		fileMap[f.Name] = f
+	}
 
 	opfPath, err := findOPF(reader)
 	if err != nil {
@@ -425,7 +439,18 @@ func run(cfg *Config, inputPath, outputPath string) error {
 		} else {
 			data, _ = json.Marshal(opf.Metadata)
 		}
-		w, _ := archive.Create("metadata.json")
+		var w io.Writer
+		method := zip.Deflate
+		if cfg.Compression == "store" {
+			method = zip.Store
+		}
+		fh := &zip.FileHeader{
+			Name:    "metadata.json",
+			Method:  method,
+			Flags:   0x800,
+			NonUTF8: false,
+		}
+		w, _ = archive.CreateHeader(fh)
 		w.Write(data)
 	}
 
@@ -455,7 +480,18 @@ func run(cfg *Config, inputPath, outputPath string) error {
 			}
 
 			name := generateFileName(cfg, op, 0, true, ".png")
-			writer, _ := archive.Create(name)
+			var writer io.Writer
+			method := zip.Deflate
+			if cfg.Compression == "store" {
+				method = zip.Store
+			}
+			fh := &zip.FileHeader{
+				Name:    name,
+				Method:  method,
+				Flags:   0x800,
+				NonUTF8: false,
+			}
+			writer, _ = archive.CreateHeader(fh)
 			col, _ := parseColor(cfg.BlankColor)
 			generateBlankImage(writer, w, h, col)
 			continue
@@ -471,10 +507,65 @@ func run(cfg *Config, inputPath, outputPath string) error {
 				ext = ".jpg"
 			}
 			name := generateFileName(cfg, op, imgIdx, false, ext)
-			writer, _ := archive.Create(name)
-			rc, _ := reader.Open(img.Path)
-			io.Copy(writer, rc)
-			rc.Close()
+
+			srcFile, ok := fileMap[img.Path]
+			if !ok {
+				return fmt.Errorf("file %s not found in epub", img.Path)
+			}
+
+			var writer io.Writer
+			var r io.Reader
+			var rc io.ReadCloser
+			var openErr, createErr error
+
+			if cfg.Compression == "raw" {
+				r, openErr = srcFile.OpenRaw()
+				if openErr == nil {
+					fh := srcFile.FileHeader
+					fh.Name = name
+					fh.Flags |= 0x800
+					fh.NonUTF8 = false
+					writer, createErr = archive.CreateRaw(&fh)
+				}
+			} else {
+				rc, openErr = srcFile.Open()
+				r = rc
+				if openErr == nil {
+					fh := srcFile.FileHeader
+					fh.Name = name
+					if cfg.Compression == "store" {
+						fh.Method = zip.Store
+					} else {
+						fh.Method = zip.Deflate
+					}
+					fh.Flags |= 0x800
+					fh.NonUTF8 = false
+					fh.CRC32 = 0
+					fh.CompressedSize = 0
+					fh.CompressedSize64 = 0
+					fh.UncompressedSize = 0
+					fh.UncompressedSize64 = 0
+					writer, createErr = archive.CreateHeader(&fh)
+				}
+			}
+
+			if openErr != nil {
+				return fmt.Errorf("failed to open source image %s: %w", img.Path, openErr)
+			}
+			if createErr != nil {
+				if rc != nil {
+					rc.Close()
+				}
+				return fmt.Errorf("failed to create zip entry for %s: %w", name, createErr)
+			}
+
+			_, err = io.Copy(writer, r)
+			if rc != nil {
+				rc.Close()
+			}
+			if err != nil {
+				return fmt.Errorf("failed to copy data for %s: %w", name, err)
+			}
 		}
 	}
 
