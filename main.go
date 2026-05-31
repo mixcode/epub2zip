@@ -98,6 +98,7 @@ type Config struct {
 	NavType         string
 	AlwaysOverwrite bool
 	Compression     string
+	Quiet           bool
 }
 
 // OutputPage represents a page to be written to the ZIP.
@@ -139,7 +140,9 @@ func main() {
 		if !cfg.DryRun && !cfg.AlwaysOverwrite {
 			if _, err := os.Stat(targetOutput); err == nil {
 				if !askOverwrite(targetOutput) {
-					fmt.Printf("Skipping %s\n", targetOutput)
+					if !cfg.Quiet {
+						fmt.Printf("Skipping %s\n", targetOutput)
+					}
 					continue
 				}
 			}
@@ -151,6 +154,10 @@ func main() {
 
 		if err := run(cfg, inputPath, targetOutput); err != nil {
 			fmt.Fprintf(os.Stderr, "Error processing %s: %v\n", inputPath, err)
+		} else {
+			if !cfg.Quiet && !cfg.DryRun {
+				fmt.Println(targetOutput)
+			}
 		}
 	}
 }
@@ -180,6 +187,7 @@ func parseFlags() *Config {
 	flag.StringVar(&cfg.NavType, "nav-type", "toc", "Navigation type: toc or landmarks")
 	flag.BoolVar(&cfg.AlwaysOverwrite, "y", false, "Always overwrite existing files without prompting")
 	flag.StringVar(&cfg.Compression, "c", "raw", "Compression method: raw, deflate, or store")
+	flag.BoolVar(&cfg.Quiet, "q", false, "Disable STDOUT output")
 
 	flag.Parse()
 
@@ -399,25 +407,27 @@ func run(cfg *Config, inputPath, outputPath string) error {
 	}
 
 	if cfg.DryRun {
-		fmt.Printf("Dry run: planned output to %s (Direction: %s)\n", outputPath, opf.Spine.Direction)
-		for _, op := range outputPages {
-			name := generateFileName(cfg, op, 0, op.SourceIdx == -1 || (op.SourceIdx != -1 && pages[op.SourceIdx].IsBlank), ".png")
-			if op.SourceIdx == -1 {
-				fmt.Printf("  Page %s: [Alignment Blank]\n", name)
-			} else if pages[op.SourceIdx].IsBlank {
-				fmt.Printf("  Page %s: [Skipped Blank]\n", name)
-			} else {
-				for j, img := range pages[op.SourceIdx].Images {
-					imgIdx := 0
-					if len(pages[op.SourceIdx].Images) > 1 {
-						imgIdx = j + 1
+		if !cfg.Quiet {
+			fmt.Printf("Dry run: planned output to %s (Direction: %s)\n", outputPath, opf.Spine.Direction)
+			for _, op := range outputPages {
+				name := generateFileName(cfg, op, 0, op.SourceIdx == -1 || (op.SourceIdx != -1 && pages[op.SourceIdx].IsBlank), ".png")
+				if op.SourceIdx == -1 {
+					fmt.Printf("  Page %s: [Alignment Blank]\n", name)
+				} else if pages[op.SourceIdx].IsBlank {
+					fmt.Printf("  Page %s: [Skipped Blank]\n", name)
+				} else {
+					for j, img := range pages[op.SourceIdx].Images {
+						imgIdx := 0
+						if len(pages[op.SourceIdx].Images) > 1 {
+							imgIdx = j + 1
+						}
+						ext := strings.ToLower(filepath.Ext(img.Path))
+						if ext == "" {
+							ext = ".jpg"
+						}
+						fname := generateFileName(cfg, op, imgIdx, false, ext)
+						fmt.Printf("  Page %s: %s\n", fname, img.Path)
 					}
-					ext := strings.ToLower(filepath.Ext(img.Path))
-					if ext == "" {
-						ext = ".jpg"
-					}
-					fname := generateFileName(cfg, op, imgIdx, false, ext)
-					fmt.Printf("  Page %s: %s\n", fname, img.Path)
 				}
 			}
 		}

@@ -65,6 +65,7 @@ epub2zip -o archive example_epub/*.epub
 | `-c` | Compression mode: `raw` (copy compressed blocks), `deflate` (re-compress), or `store` (uncompressed) | `raw` |
 | `-f` | Force execution on reflowable books | `false` |
 | `-y` | Always overwrite existing files without prompting | `false` |
+| `-q` | Quiet mode: suppress all STDOUT outputs | `false` |
 | `--prefix-parts` | Prefix filenames with part names | `true` |
 | `--total-numbering` | Include/use global page numbering | `false` |
 | `--nav-type` | EPUB 3 navigation type: `toc` or `landmarks` | `toc` |
