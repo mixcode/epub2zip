@@ -1,0 +1,29 @@
+# epub2zip
+
+> A Go command-line tool that extracts the page images from a **fixed-layout**
+> EPUB (illustrated / art / manga books) and repackages them as a standard ZIP —
+> preserving page order, reading direction (LTR/RTL), and double-page spread
+> alignment.
+
+**Use it when** you have a fixed-layout EPUB and want its images as an ordered
+ZIP. **Not for** reflowable/text EPUBs (it refuses unless `-f`), and it is not a
+general EPUB reader or text extractor.
+
+## Docs
+
+- [Full agent manual](llms-full.txt): invocation contract, flags, output, and the
+  traps — **read this first** for scripting or unattended/agent use.
+- [README](README.md): features, install, usage examples, the full flag table,
+  naming schemes, and alignment logic.
+
+## Quick use
+
+```bash
+epub2zip book.epub            # -> book.zip in the current directory
+epub2zip -d book.epub         # dry run: list pages, write nothing
+epub2zip -y -o out/ *.epub    # batch into out/, overwrite without prompting
+```
+
+## For contributors
+
+- [AGENTS.txt](AGENTS.txt): project shape, invariants, and the extension checklist.

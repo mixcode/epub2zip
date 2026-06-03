@@ -1,0 +1,73 @@
+# AI and LLM Agent Instructions for epub2zip
+
+`epub2zip` is a Go **command-line tool**. It extracts the page images from a
+fixed-layout EPUB and writes them, in reading order, into a standard ZIP.
+
+> **Source of truth:** the code (`main.go`) and the README. This manual is
+> *derived* — if they ever disagree, the code wins.
+
+---
+
+## 1. When to use it (selection surface)
+
+- **Use when:** you have a **fixed-layout** EPUB (illustrated / art / manga book)
+  and want its images as an ordered `.zip` — with page order, reading direction
+  (LTR/RTL), and spread alignment preserved.
+- **Not for:** reflowable/text EPUBs (it detects these and refuses unless `-f`);
+  reading EPUB text/metadata generally; or converting arbitrary archives.
+
+## 2. Invocation contract
+
+```
+epub2zip [flags] <input.epub> [more.epub ...]
+```
+
+- **Inputs:** one or more EPUB paths; `*`/`?` globs are expanded internally
+  (handy on Windows shells).
+- **Output naming:** with no `-o`, each `book.epub` → `book.zip` in the current
+  directory. `-o file.zip` names a single output; `-o dir/` (a directory) writes
+  one zip per input into that directory. Multiple inputs with a non-directory
+  `-o` is an error (exit 1).
+- Unless `-m none`, a `metadata.json` is also written into the zip.
+- See the README's **CLI Flags** table for the full list; the agent-relevant ones
+  are in §3.
+
+## 3. Unattended / agent use (important)
+
+The defaults assume an interactive human. For scripted or agent runs:
+
+- **Overwrite behavior — `-q` and `-y`.** When the output already exists:
+  - with **`-q`** (quiet/unattended): the file is **skipped silently** — no
+    prompt, so a quiet run never hangs;
+  - without `-q`: the tool prints `Overwrite? [y/N]:` and waits on stdin (a
+    non-quiet *unattended* run will hang here — pass `-q`);
+  - **`-y`** overwrites unconditionally, in either mode.
+  So for agent/unattended runs use **`-q`** (skip existing) or **`-q -y`**
+  (overwrite existing).
+- **`-d` — dry run (read-only).** Lists the pages it *would* write and creates
+  nothing. Use it to preview safely.
+- **`-q` — quiet.** Suppresses stdout (see §4) and turns the overwrite prompt
+  into a silent skip (above).
+- **`-f` — force** processing of a book detected as reflowable (otherwise it
+  warns to stderr and skips).
+
+## 4. Output & exit behavior (traps)
+
+- **stdout:** on success the tool prints the output zip path (one per input);
+  suppressed by `-q` and by `-d`. **stderr:** warnings and per-file errors
+  (`Error processing <file>: ...`).
+- **Exit codes** (reliable — use `$?`): `0` = all inputs succeeded; `1` = usage
+  error (no input given, or multiple inputs with a non-directory `-o`); `2` = the
+  tool ran but **one or more inputs failed** to process (each failure is reported
+  on stderr). In a batch, a single bad file yields exit `2` while the others
+  still convert.
+- **Mutating vs read-only:** a normal run **writes files** (`<name>.zip`, plus
+  `metadata.json` unless `-m none`). On an existing output it prompts (interactive),
+  **skips** (`-q`), or **overwrites** (`-y`). `-d` is the only fully read-only mode.
+
+## 5. Install note
+
+{TODO: the README says `go install github.com/mixcode/epub2zip@latest`, but
+`go.mod` declares `module epub2zip` — that install path will not resolve as-is.
+Verify/align the module path (or the README) so `go install` works; until then,
+build from a clone with `go build`.}

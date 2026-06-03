@@ -1,0 +1,53 @@
+# Agent Instructions for Contributing to epub2zip
+
+Read this before modifying the codebase. For *using* the tool, see llms-full.txt.
+
+## 1. Project shape
+
+A single-binary Go CLI. Module `epub2zip` (Go 1.26), dependency `golang.org/x/net`.
+Essentially all logic lives in **`main.go`** (~870 lines): `parseFlags` builds a
+`Config` from `flag` switches; the `main` loop resolves output paths, handles the
+overwrite prompt, and calls `run(cfg, input, output)` per EPUB. `build_win.sh`
+cross-builds the Windows binary.
+
+## 2. Invariants you must not break
+
+- **Refuse reflowable EPUBs unless `-f`.** Fixed-layout detection is the tool's
+  whole premise; don't silently process text books.
+- **Strict UTF-8 zip filename headers** (general-purpose bit 11) on every entry —
+  this is what keeps non-Latin (e.g. Japanese) filenames from corrupting on
+  extraction. Don't regress it.
+- **`raw` compression copies compressed blocks** straight from the EPUB (the big
+  speedup); `deflate`/`store` re-process. Keep the three `-c` modes behaving as
+  documented.
+- **`-d` (dry run) must stay read-only.**
+- **`-q` must never block on input.** In quiet mode the overwrite prompt is
+  replaced by a silent skip (existing output is skipped unless `-y`), so
+  unattended runs can't hang on stdin. Keep stdout fully silenced under `-q` too.
+
+## 3. Build, test, and verify
+
+```bash
+go build ./...
+go vet ./...
+gofmt -l .            # should print nothing
+```
+{TODO: there are no tests in the repo — `go test ./...` is a no-op. Consider a
+small fixture EPUB + a round-trip test.}
+
+## 4. Extension checklist (adding a flag/behavior)
+
+- [ ] Add the field to `Config` and a `flag.XVar` in `parseFlags` with a clear
+      default and help string.
+- [ ] Handle it in the `main` loop / `run`.
+- [ ] Update docs: the README **CLI Flags** table, and **llms-full.txt** (§3 if it
+      affects unattended use, §4 if it changes output/exit behavior).
+
+Exit-code contract (keep it intact): `0` = all inputs succeeded, `1` = usage
+error, `2` = one or more inputs failed to process. `main` tracks `anyFailed` and
+exits `2` after the loop — preserve this so scripts/agents can detect failure.
+
+## 5. Housekeeping noticed during audit (not blocking)
+
+- {TODO: README install line `go install github.com/mixcode/epub2zip@latest` does
+  not match `go.mod` `module epub2zip` — align the module path or the README.}

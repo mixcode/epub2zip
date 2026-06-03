@@ -1,5 +1,10 @@
 # epub2zip
 
+> [!NOTE]
+> **AI agents / scripting**: read [llms-full.txt](llms-full.txt) for the
+> invocation contract and unattended-use notes (pass `-y` to avoid the
+> interactive overwrite prompt; exit codes are `0`/`1`/`2` — see below).
+
 A robust Go command-line utility to extract sequential images from fixed-layout EPUBs (illustrated and art books) and archive them into standard ZIP files.
 
 `epub2zip` is designed specifically for fixed-layout digital books, ensuring that the physical page layout (Left-to-Right or Right-to-Left) and structural alignment are preserved.
@@ -70,10 +75,18 @@ epub2zip -o archive example_epub/*.epub
 | `-c` | Compression mode: `raw` (copy compressed blocks), `deflate` (re-compress), or `store` (uncompressed) | `raw` |
 | `-f` | Force execution on reflowable books | `false` |
 | `-y` | Always overwrite existing files without prompting | `false` |
-| `-q` | Quiet mode: suppress all STDOUT outputs | `false` |
+| `-q` | Quiet mode: suppress all STDOUT output; existing outputs are skipped (not prompted) unless `-y` | `false` |
 | `--prefix-parts` | Prefix filenames with part names | `true` |
 | `--total-numbering` | Include/use global page numbering | `false` |
 | `--nav-type` | EPUB 3 navigation type: `toc` or `landmarks` | `toc` |
+
+## Exit Codes
+
+| Code | Meaning |
+| :--- | :--- |
+| `0` | All inputs converted successfully |
+| `1` | Usage error (no input, or multiple inputs with a non-directory `-o`) |
+| `2` | One or more inputs failed to process (details on stderr); other inputs in a batch still convert |
 
 ## Naming Schemes
 
