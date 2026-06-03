@@ -121,6 +121,7 @@ func main() {
 		}
 	}
 
+	anyFailed := false
 	for _, inputPath := range cfg.InputPaths {
 		targetOutput := cfg.OutputPath
 		if targetOutput == "" {
@@ -139,7 +140,9 @@ func main() {
 		// Overwrite check
 		if !cfg.DryRun && !cfg.AlwaysOverwrite {
 			if _, err := os.Stat(targetOutput); err == nil {
-				if !askOverwrite(targetOutput) {
+				// In quiet (unattended) mode, never prompt: skip an existing
+				// output unless -y was given. Otherwise, ask interactively.
+				if cfg.Quiet || !askOverwrite(targetOutput) {
 					if !cfg.Quiet {
 						fmt.Printf("Skipping %s\n", targetOutput)
 					}
@@ -154,11 +157,18 @@ func main() {
 
 		if err := run(cfg, inputPath, targetOutput); err != nil {
 			fmt.Fprintf(os.Stderr, "Error processing %s: %v\n", inputPath, err)
+			anyFailed = true
 		} else {
 			if !cfg.Quiet && !cfg.DryRun {
 				fmt.Println(targetOutput)
 			}
 		}
+	}
+
+	// Exit non-zero if any input failed to process, so scripts and agents can
+	// detect partial failure (usage errors above exit 1; processing errors 2).
+	if anyFailed {
+		os.Exit(2)
 	}
 }
 
