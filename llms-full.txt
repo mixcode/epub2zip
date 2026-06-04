@@ -65,9 +65,8 @@ The defaults assume an interactive human. For scripted or agent runs:
   `metadata.json` unless `-m none`). On an existing output it prompts (interactive),
   **skips** (`-q`), or **overwrites** (`-y`). `-d` is the only fully read-only mode.
 
-## 5. Install note
+## 5. Install
 
-{TODO: the README says `go install github.com/mixcode/epub2zip@latest`, but
-`go.mod` declares `module epub2zip` — that install path will not resolve as-is.
-Verify/align the module path (or the README) so `go install` works; until then,
-build from a clone with `go build`.}
+`go install github.com/mixcode/epub2zip@latest` (the `go.mod` module path matches
+this), or clone and `go build`. Pre-built binaries are on the GitHub Releases
+page — see the README.

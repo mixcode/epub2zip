@@ -46,8 +46,3 @@ small fixture EPUB + a round-trip test.}
 Exit-code contract (keep it intact): `0` = all inputs succeeded, `1` = usage
 error, `2` = one or more inputs failed to process. `main` tracks `anyFailed` and
 exits `2` after the loop — preserve this so scripts/agents can detect failure.
-
-## 5. Housekeeping noticed during audit (not blocking)
-
-- {TODO: README install line `go install github.com/mixcode/epub2zip@latest` does
-  not match `go.mod` `module epub2zip` — align the module path or the README.}
