@@ -85,7 +85,7 @@ epub2zip -o archive example_epub/*.epub
 | Code | Meaning |
 | :--- | :--- |
 | `0` | All inputs converted successfully |
-| `1` | Usage error (no input, or multiple inputs with a non-directory `-o`) |
+| `1` | Usage error (no input, invalid flag, or multiple inputs with a non-directory `-o`) |
 | `2` | One or more inputs failed to process (details on stderr); other inputs in a batch still convert |
 
 ## Naming Schemes

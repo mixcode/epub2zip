@@ -23,7 +23,8 @@ epub2zip [flags] <input.epub> [more.epub ...]
 ```
 
 - **Inputs:** one or more EPUB paths; `*`/`?` globs are expanded internally
-  (handy on Windows shells).
+  (handy on Windows shells). A glob that matches nothing is reported on stderr
+  and skipped — if that leaves no inputs, it's a usage error (exit `1`).
 - **Output naming:** with no `-o`, each `book.epub` → `book.zip` in the current
   directory. `-o file.zip` names a single output; `-o dir/` (a directory) writes
   one zip per input into that directory. Multiple inputs with a non-directory
@@ -58,10 +59,10 @@ The defaults assume an interactive human. For scripted or agent runs:
   suppressed by `-q` and by `-d`. **stderr:** warnings and per-file errors
   (`Error processing <file>: ...`).
 - **Exit codes** (reliable — use `$?`): `0` = all inputs succeeded; `1` = usage
-  error (no input given, or multiple inputs with a non-directory `-o`); `2` = the
-  tool ran but **one or more inputs failed** to process (each failure is reported
-  on stderr). In a batch, a single bad file yields exit `2` while the others
-  still convert.
+  error (no input, an invalid flag, or multiple inputs with a non-directory
+  `-o`); `2` = the tool ran but **one or more inputs failed** to process (each
+  failure is reported on stderr). In a batch, a single bad file yields exit `2`
+  while the others still convert.
 - **Mutating vs read-only:** a normal run **writes files** (`<name>.zip`, plus
   `metadata.json` unless `-m none`). On an existing output it prompts (interactive),
   **skips** (`-q`), or **overwrites** (`-y`). `-d` is the only fully read-only mode.

@@ -199,15 +199,36 @@ func parseFlags() *Config {
 	flag.StringVar(&cfg.Compression, "c", "raw", "Compression method: raw, deflate, or store")
 	flag.BoolVar(&cfg.Quiet, "q", false, "Disable STDOUT output")
 
-	flag.Parse()
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr,
+			"epub2zip — extract page images from a fixed-layout EPUB into a ZIP.\n\n"+
+				"Usage: epub2zip [flags] <input.epub> [more.epub ...]\n"+
+				"Globs (*, ?) are expanded internally. Long flags accept one or two dashes.\n\n"+
+				"Flags:\n")
+		flag.PrintDefaults()
+	}
+	// ContinueOnError so an invalid flag is a usage error (exit 1), consistent
+	// with the documented exit-code contract, rather than the flag package's
+	// default exit 2 (which we reserve for per-file processing failure).
+	flag.CommandLine.Init(os.Args[0], flag.ContinueOnError)
+	if err := flag.CommandLine.Parse(os.Args[1:]); err != nil {
+		if err == flag.ErrHelp {
+			os.Exit(0) // -h / --help is not an error
+		}
+		os.Exit(1)
+	}
 
 	for _, arg := range flag.Args() {
 		if strings.ContainsAny(arg, "*?") {
 			matches, _ := filepath.Glob(arg)
-			if len(matches) > 0 {
-				cfg.InputPaths = append(cfg.InputPaths, matches...)
+			if len(matches) == 0 {
+				// An unmatched glob contributes no inputs; warn and skip it
+				// (don't fall through to treat the pattern as a literal path).
+				fmt.Fprintf(os.Stderr, "Warning: no files match pattern %q\n", arg)
 				continue
 			}
+			cfg.InputPaths = append(cfg.InputPaths, matches...)
+			continue
 		}
 		cfg.InputPaths = append(cfg.InputPaths, arg)
 	}
