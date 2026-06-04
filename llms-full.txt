@@ -39,8 +39,9 @@ The defaults assume an interactive human. For scripted or agent runs:
 - **Overwrite behavior — `-q` and `-y`.** When the output already exists:
   - with **`-q`** (quiet/unattended): the file is **skipped silently** — no
     prompt, so a quiet run never hangs;
-  - without `-q`: the tool prints `Overwrite? [y/N]:` and waits on stdin (a
-    non-quiet *unattended* run will hang here — pass `-q`);
+  - without `-q`: the tool prints `Overwrite? [y/N]:` and reads stdin — on an
+    interactive terminal it blocks waiting for input (pass `-q` for unattended
+    use); with stdin closed/redirected it reads EOF and skips the file;
   - **`-y`** overwrites unconditionally, in either mode.
   So for agent/unattended runs use **`-q`** (skip existing) or **`-q -y`**
   (overwrite existing).

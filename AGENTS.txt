@@ -4,7 +4,7 @@ Read this before modifying the codebase. For *using* the tool, see llms-full.txt
 
 ## 1. Project shape
 
-A single-binary Go CLI. Module `epub2zip` (Go 1.26), dependency `golang.org/x/net`.
+A single-binary Go CLI. Module `github.com/mixcode/epub2zip` (Go 1.26), dependency `golang.org/x/net`.
 Essentially all logic lives in **`main.go`** (~870 lines): `parseFlags` builds a
 `Config` from `flag` switches; the `main` loop resolves output paths, handles the
 overwrite prompt, and calls `run(cfg, input, output)` per EPUB. `build_win.sh`
